@@ -4,11 +4,10 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const bodyParser = require("body-parser");
-const util = require('util');
+const util = require("util");
 
 const app = express();
 const port = 5000;
-
 
 // Middleware
 
@@ -73,33 +72,95 @@ app.put("/api/products/:id", (req, res) => {
   const productId = req.params.id;
   const updatedProduct = req.body;
 
-  const sql = "UPDATE products SET ? WHERE id = ?";
-  db.query(sql, [updatedProduct, productId], (err, result) => {
-    if (err) return res.status(500).send("Server error");
-    res.status(200).send({ message: "Product updated successfully" });
+  // Kiểm tra xem sản phẩm có tồn tại không
+  const checkSql = "SELECT * FROM products WHERE id = ?";
+  db.query(checkSql, [productId], (err, result) => {
+    if (err) {
+      console.error("Lỗi khi kiểm tra sản phẩm:", err);
+      return res.status(500).send({ message: "Server error" });
+    }
+
+    if (result.length === 0) {
+      return res.status(404).send({ message: "Product not found" });
+    }
+
+    // Kiểm tra trùng lặp mã sản phẩm hoặc tên sản phẩm
+    const checkDuplicateSql =
+      "SELECT * FROM products WHERE (code = ? OR name = ?) AND id != ?";
+    db.query(
+      checkDuplicateSql,
+      [updatedProduct.code, updatedProduct.name, productId],
+      (err, duplicateResults) => {
+        if (err) {
+          console.error("Lỗi khi kiểm tra trùng lặp:", err);
+          return res.status(500).send({ message: "Server error" });
+        }
+
+        if (duplicateResults.length > 0) {
+          return res.status(400).send({
+            message: "Mã sản phẩm hoặc tên sản phẩm đã tồn tại",
+          });
+        }
+
+        // Nếu không trùng lặp, thực hiện cập nhật
+        const updateSql = "UPDATE products SET ? WHERE id = ?";
+        db.query(updateSql, [updatedProduct, productId], (err, result) => {
+          if (err) {
+            console.error("Lỗi khi cập nhật sản phẩm:", err);
+            return res.status(500).send({ message: "Server error" });
+          }
+
+          res.status(200).send({ message: "Product updated successfully" });
+        });
+      }
+    );
+  });
+});
+app.get("/api/products/:id", (req, res) => {
+  const productId = req.params.id;
+  const query = "SELECT * FROM products WHERE id = ?";
+  db.query(query, [productId], (err, results) => {
+    if (err) {
+      console.error("Lỗi truy vấn MySQL:", err);
+      return res.status(500).send("Lỗi server");
+    }
+    if (results.length === 0) {
+      return res.status(404).send("Không tìm thấy sản phẩm");
+    }
+    res.json(results[0]); // Trả về sản phẩm đầu tiên
   });
 });
 app.delete("/api/products/:id", (req, res) => {
-    const productId = req.params.id;
-  
-    // Xóa các bản ghi liên quan trong bảng payments
-    db.query("DELETE FROM payments WHERE product_id = ?", [productId], (err, result) => {
+  const productId = req.params.id;
+
+  // Xóa các bản ghi liên quan trong bảng payments
+  db.query(
+    "DELETE FROM payments WHERE product_id = ?",
+    [productId],
+    (err, result) => {
       if (err) {
         console.error("Lỗi khi xóa payments:", err);
         return res.status(500).json({ message: "Lỗi server khi xóa payments" });
       }
-  
+
       // Xóa sản phẩm
-      db.query("DELETE FROM products WHERE id = ?", [productId], (err, result) => {
-        if (err) {
-          console.error("Lỗi khi xóa sản phẩm:", err);
-          return res.status(500).json({ message: "Lỗi server khi xóa sản phẩm" });
+      db.query(
+        "DELETE FROM products WHERE id = ?",
+        [productId],
+        (err, result) => {
+          if (err) {
+            console.error("Lỗi khi xóa sản phẩm:", err);
+            return res
+              .status(500)
+              .json({ message: "Lỗi server khi xóa sản phẩm" });
+          }
+
+          res.status(200).json({ message: "Xóa sản phẩm thành công" });
         }
-  
-        res.status(200).json({ message: "Xóa sản phẩm thành công" });
-      });
-    });
-  });
+      );
+    }
+  );
+});
 // Thêm sản phẩm vào giỏ hàng
 app.post("/api/cart/add", (req, res) => {
   const { user_id, product_id, quantity, size } = req.body;
@@ -140,21 +201,21 @@ app.get("/api/cart/:user_id", (req, res) => {
 
 // Lấy tất cả đơn hàng (cho admin)
 app.get("/api/admin/orders", (req, res) => {
-    const query = `
+  const query = `
       SELECT cart.id, cart.user_id, cart.quantity, cart.size, cart.status, cart.order_date, 
              products.id AS product_id, products.code, products.name, products.price, products.image
       FROM cart
       JOIN products ON cart.product_id = products.id
     `;
-    db.query(query, (err, results) => {
-      if (err) {
-        console.error("Lỗi khi lấy đơn hàng:", err);
-        res.status(500).send("Lỗi server");
-      } else {
-        res.json(results);
-      }
-    });
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error("Lỗi khi lấy đơn hàng:", err);
+      res.status(500).send("Lỗi server");
+    } else {
+      res.json(results);
+    }
   });
+});
 
 // Cập nhật trạng thái thanh toán
 app.put("/api/cart/update-status/:id", (req, res) => {
@@ -190,60 +251,59 @@ app.put("/api/cart/checkout-item/:id", (req, res) => {
 });
 // Cập nhật trạng thái đơn hàng
 app.put("/api/admin/orders/:id/status", (req, res) => {
-    const { id } = req.params;
-    const { status } = req.body;
-  
-    const query = "UPDATE cart SET status = ? WHERE id = ?";
-    db.query(query, [status, id], (err, results) => {
-      if (err) {
-        console.error("Lỗi khi cập nhật trạng thái đơn hàng:", err);
-        res.status(500).send("Lỗi server");
-      } else {
-        res.status(200).json({ message: "Trạng thái đơn hàng đã được cập nhật" });
-      }
-    });
-  });
+  const { id } = req.params;
+  const { status } = req.body;
 
-  // Tính tổng doanh thu
+  const query = "UPDATE cart SET status = ? WHERE id = ?";
+  db.query(query, [status, id], (err, results) => {
+    if (err) {
+      console.error("Lỗi khi cập nhật trạng thái đơn hàng:", err);
+      res.status(500).send("Lỗi server");
+    } else {
+      res.status(200).json({ message: "Trạng thái đơn hàng đã được cập nhật" });
+    }
+  });
+});
+
+// Tính tổng doanh thu
 app.get("/api/admin/revenue", (req, res) => {
-    const query = `
+  const query = `
       SELECT SUM(products.price * cart.quantity) AS total_revenue
       FROM cart
       JOIN products ON cart.product_id = products.id
       WHERE cart.status = 'received'
     `;
-    db.query(query, (err, results) => {
-      if (err) {
-        console.error("Lỗi khi tính tổng doanh thu:", err);
-        res.status(500).send("Lỗi server");
-      } else {
-        res.json(results[0]);
-      }
-    });
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error("Lỗi khi tính tổng doanh thu:", err);
+      res.status(500).send("Lỗi server");
+    } else {
+      res.json(results[0]);
+    }
   });
+});
 
 //Cập nhất số lượng sản phẩm trong giỏ hàng
 app.put("/api/cart/update/:id", (req, res) => {
-    const { id } = req.params;
-    const { quantity } = req.body;
-  
-    console.log("Dữ liệu nhận được:", { id, quantity }); // Debug
-  
-    if (!id || !quantity || isNaN(quantity)) {
-      return res.status(400).json({ error: "Dữ liệu không hợp lệ" });
+  const { id } = req.params;
+  const { quantity } = req.body;
+
+  console.log("Dữ liệu nhận được:", { id, quantity }); // Debug
+
+  if (!id || !quantity || isNaN(quantity)) {
+    return res.status(400).json({ error: "Dữ liệu không hợp lệ" });
+  }
+
+  const query = "UPDATE cart SET quantity = ? WHERE id = ?";
+  db.query(query, [quantity, id], (err, results) => {
+    if (err) {
+      console.error("Lỗi khi cập nhật số lượng sản phẩm:", err);
+      res.status(500).send("Lỗi server");
+    } else {
+      res.status(200).json({ message: "Số lượng sản phẩm đã được cập nhật" });
     }
-  
-    const query = "UPDATE cart SET quantity = ? WHERE id = ?";
-    db.query(query, [quantity, id], (err, results) => {
-      if (err) {
-        console.error("Lỗi khi cập nhật số lượng sản phẩm:", err);
-        res.status(500).send("Lỗi server");
-      } else {
-        res.status(200).json({ message: "Số lượng sản phẩm đã được cập nhật" });
-      }
-    });
   });
-  
+});
 
 // Lấy thông tin thanh toán
 app.post("/api/payments", (req, res) => {
@@ -288,72 +348,79 @@ app.put("/api/cart/cancel/:id", (req, res) => {
 });
 
 // server.js (hoặc file xử lý API của bạn)
-app.put('/api/cart/received/:id', (req, res) => {
-    const { id } = req.params;
-  
-    const query = "UPDATE cart SET status = 'received' WHERE id = ?";
-    db.query(query, [id], (err, results) => {
-      if (err) {
-        console.error("Lỗi khi cập nhật trạng thái đơn hàng:", err);
-        res.status(500).json({ message: "Lỗi server khi cập nhật trạng thái đơn hàng" });
-      } else {
-        if (results.affectedRows === 0) {
-          return res.status(404).json({ message: "Đơn hàng không tồn tại" });
-        }
-        res.status(200).json({ message: "Cập nhật trạng thái đơn hàng thành công" });
+app.put("/api/cart/received/:id", (req, res) => {
+  const { id } = req.params;
+
+  const query = "UPDATE cart SET status = 'received' WHERE id = ?";
+  db.query(query, [id], (err, results) => {
+    if (err) {
+      console.error("Lỗi khi cập nhật trạng thái đơn hàng:", err);
+      res
+        .status(500)
+        .json({ message: "Lỗi server khi cập nhật trạng thái đơn hàng" });
+    } else {
+      if (results.affectedRows === 0) {
+        return res.status(404).json({ message: "Đơn hàng không tồn tại" });
       }
-    });
-  });
-// API để lấy danh sách người dùng
-app.get("/api/users", (req, res) => {
-    const query = "SELECT id, name FROM users"; // Lấy id và username từ bảng users
-    db.query(query, (err, results) => {
-      if (err) {
-        console.error("Lỗi truy vấn MySQL:", err);
-        res.status(500).json({ message: "Lỗi server khi lấy danh sách người dùng" });
-      } else {
-        res.json(results);
-      }
-    });
-  });
-
-  // server.js (hoặc file API của bạn)
-  app.get("/api/admin/statistics", async (req, res) => {
-    try {
-      // Lấy tổng số người dùng
-      const totalUsersResult = await query("SELECT COUNT(*) as total FROM users");
-      const totalUsers = totalUsersResult[0].total;
-  
-      // Lấy tổng số sản phẩm đã bán
-      const totalProductsSoldResult = await query(
-        "SELECT SUM(quantity) as total FROM cart WHERE status = 'received'"
-      );
-      const totalProductsSold = totalProductsSoldResult[0].total || 0;
-  
-      // Lấy tổng doanh thu
-      const totalRevenueResult = await query(
-        "SELECT SUM(products.price * cart.quantity) as total FROM cart JOIN products ON cart.product_id = products.id WHERE cart.status = 'received'"
-      );
-      const totalRevenue = totalRevenueResult[0].total || 0;
-
-      
-    // Lấy tổng số đơn hàng bị hủy
-    const totalCancelledOrdersResult = await query(
-        "SELECT COUNT(*) as total FROM cart WHERE status = 'cancelled'"
-      );
-      const totalCancelledOrders = totalCancelledOrdersResult[0].total || 0;
-
-      res.json({
-        totalUsers,
-        totalProductsSold,
-        totalRevenue,
-        totalCancelledOrders
-      });
-    } catch (error) {
-      console.error("Lỗi khi lấy dữ liệu thống kê:", error);
-      res.status(500).json({ message: "Lỗi server khi lấy dữ liệu thống kê" });
+      res
+        .status(200)
+        .json({ message: "Cập nhật trạng thái đơn hàng thành công" });
     }
   });
+});
+// API để lấy danh sách người dùng
+app.get("/api/users", (req, res) => {
+  const query = "SELECT id, name FROM users"; // Lấy id và username từ bảng users
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error("Lỗi truy vấn MySQL:", err);
+      res
+        .status(500)
+        .json({ message: "Lỗi server khi lấy danh sách người dùng" });
+    } else {
+      res.json(results);
+    }
+  });
+});
+
+// server.js (hoặc file API của bạn)
+app.get("/api/admin/statistics", async (req, res) => {
+  try {
+    // Lấy tổng số người dùng (chỉ tính role là 'user')
+    const totalUsersResult = await query(
+      "SELECT COUNT(*) as total FROM users WHERE role = 'user'"
+    );
+    const totalUsers = totalUsersResult[0].total;
+
+    // Lấy tổng số sản phẩm đã bán
+    const totalProductsSoldResult = await query(
+      "SELECT SUM(quantity) as total FROM cart WHERE status = 'received'"
+    );
+    const totalProductsSold = totalProductsSoldResult[0].total || 0;
+
+    // Lấy tổng doanh thu
+    const totalRevenueResult = await query(
+      "SELECT SUM(products.price * cart.quantity) as total FROM cart JOIN products ON cart.product_id = products.id WHERE cart.status = 'received'"
+    );
+    const totalRevenue = totalRevenueResult[0].total || 0;
+
+    // Lấy tổng số đơn hàng bị hủy
+    const totalCancelledOrdersResult = await query(
+      "SELECT COUNT(*) as total FROM cart WHERE status = 'cancelled'"
+    );
+    const totalCancelledOrders = totalCancelledOrdersResult[0].total || 0;
+
+    res.json({
+      totalUsers,
+      totalProductsSold,
+      totalRevenue,
+      totalCancelledOrders,
+    });
+  } catch (error) {
+    console.error("Lỗi khi lấy dữ liệu thống kê:", error);
+    res.status(500).json({ message: "Lỗi server khi lấy dữ liệu thống kê" });
+  }
+});
 // Đăng ký
 app.post("/register", (req, res) => {
   const { name, email, password } = req.body;
